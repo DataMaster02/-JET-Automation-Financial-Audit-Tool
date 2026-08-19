@@ -40,6 +40,29 @@ class DataLabReadyFilterTests(unittest.TestCase):
         self.assertEqual(len(dates), 3)
         self.assertEqual(len(hours), 2)
 
+    def test_date_between_includes_whole_end_day_and_mixed_formats(self):
+        excel_serial = (pd.Timestamp("2026-01-20") - pd.Timestamp("1899-12-30")).days
+        df = pd.DataFrame({
+            "ID": [1, 2, 3, 4, 5, 6],
+            "TARIH_METIN": [
+                "2026-01-01 07:00",
+                "31.01.2026 23:59",
+                "01/15/2026",
+                "2026-02-01 00:00",
+                "tarih degil",
+                str(excel_serial),
+            ],
+        })
+        out = apply_column_tools(df, {
+            "op": "ready_filter",
+            "filter_id": "date_between",
+            "filter_name": "Belirli tarihler",
+            "columns": ["TARIH_METIN"],
+            "column_method": "any",
+            "params": {"start_date": "2026-01-01", "end_date": "2026-01-31", "ignore_time": True},
+        })
+        self.assertEqual(out["ID"].tolist(), [1, 2, 3, 6])
+
     def test_ready_filter_chain_and_account_codes(self):
         df = pd.DataFrame({
             "KEBIR": ["600.01", "601.01", "102.01", "770.01"],

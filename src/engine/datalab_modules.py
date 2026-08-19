@@ -696,7 +696,12 @@ def _apply_ready_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             reason = "Yil sonu"
         else:
             for c in cols:
-                m = _manual_filter_mask(df, {"column": c, "operator": "date_between", "value": params.get("start_date"), "value2": params.get("end_date")})
+                m = _date_range_mask(
+                    df[c],
+                    params.get("start_date"),
+                    params.get("end_date"),
+                    params.get("ignore_time", True),
+                )
                 masks.append(~m if params.get("outside", False) else m)
             reason = "Tarih araligi"
         mask = _combine_masks(masks, df.index, method)
@@ -851,7 +856,15 @@ def _apply_ready_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             mask = _combine_masks(masks, df.index, method)
             helpers = _matched_helpers(df, cols, masks, filter_name, "Dönem sonu aralığı")
         else:
-            masks = [_manual_filter_mask(df, {"column": c, "operator": "date_between", "value": params.get("start_date"), "value2": params.get("end_date")}) for c in cols]
+            masks = [
+                _date_range_mask(
+                    df[c],
+                    params.get("start_date"),
+                    params.get("end_date"),
+                    params.get("ignore_time", True),
+                )
+                for c in cols
+            ]
             mask = _combine_masks(masks, df.index, method)
             helpers = _matched_helpers(df, cols, masks, filter_name, "Belirli tarih aralığı")
         return _with_helpers(df, mask, helpers, include_helpers)
@@ -1176,14 +1189,73 @@ def _parse_filter_values(value, options=None):
 
 def _coerce_date(values) -> pd.Series:
     s = values if isinstance(values, pd.Series) else pd.Series(values)
-    return pd.to_datetime(s, errors="coerce", dayfirst=True)
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return pd.to_datetime(s, errors="coerce")
+
+    try:
+        parsed = pd.to_datetime(s, errors="coerce", dayfirst=True, format="mixed")
+    except TypeError:
+        parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+
+    text_values = s.astype("string").str.strip()
+    iso_mask = text_values.str.match(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}", na=False)
+    if iso_mask.any():
+        try:
+            parsed_iso = pd.to_datetime(s[iso_mask], errors="coerce", dayfirst=False, format="mixed")
+        except TypeError:
+            parsed_iso = pd.to_datetime(s[iso_mask], errors="coerce", dayfirst=False)
+        parsed.loc[iso_mask] = parsed_iso
+
+    missing = parsed.isna() & s.notna()
+    if missing.any():
+        try:
+            parsed_alt = pd.to_datetime(s[missing], errors="coerce", dayfirst=False, format="mixed")
+        except TypeError:
+            parsed_alt = pd.to_datetime(s[missing], errors="coerce", dayfirst=False)
+        parsed.loc[missing] = parsed_alt
+
+    missing = parsed.isna() & s.notna()
+    if missing.any():
+        numeric = pd.to_numeric(s[missing], errors="coerce")
+        excel_like = numeric.notna() & numeric.between(1, 2958465)
+        if excel_like.any():
+            excel_dates = pd.to_datetime(
+                numeric[excel_like],
+                errors="coerce",
+                unit="D",
+                origin="1899-12-30",
+            )
+            parsed.loc[numeric[excel_like].index] = excel_dates
+    return parsed
 
 
 def _date_scalar(value):
     text = str(value or "").strip()
     if re.match(r"^\d{4}-\d{1,2}-\d{1,2}", text):
         return pd.to_datetime(text, errors="coerce", dayfirst=False)
-    return pd.to_datetime(value, errors="coerce", dayfirst=True)
+    try:
+        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True, format="mixed")
+    except TypeError:
+        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        try:
+            parsed = pd.to_datetime(value, errors="coerce", dayfirst=False, format="mixed")
+        except TypeError:
+            parsed = pd.to_datetime(value, errors="coerce", dayfirst=False)
+    return parsed
+
+
+def _date_range_mask(values, start_value, end_value, ignore_time=True):
+    dt = _coerce_date(values)
+    start = _date_scalar(start_value)
+    end = _date_scalar(end_value)
+    if pd.isna(start) or pd.isna(end):
+        return pd.Series(False, index=dt.index)
+    if start > end:
+        start, end = end, start
+    if ignore_time:
+        return dt.dt.normalize().between(start.normalize(), end.normalize(), inclusive="both").fillna(False)
+    return dt.between(start, end, inclusive="both").fillna(False)
 
 
 def _week_bounds(now=None, offset=0):
@@ -1318,9 +1390,7 @@ def _manual_filter_mask(df: pd.DataFrame, condition: dict) -> pd.Series:
         except Exception:
             return pd.Series(False, index=df.index)
     if op == "date_between":
-        start = _date_scalar(value)
-        end = _date_scalar(value2)
-        return dt.between(start, end)
+        return _date_range_mask(raw, value, value2, options.get("ignore_time", True))
     if op == "today":
         return dt.dt.normalize().eq(today)
     if op == "yesterday":
