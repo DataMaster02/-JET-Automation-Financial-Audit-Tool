@@ -3,7 +3,7 @@
 # Arrow cache | Index | Column typing | Thread-safe
 # ================================================================
 
-import os, gc, time, logging, threading, tempfile, shutil
+import os, gc, time, logging, threading, tempfile, shutil, re
 from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
@@ -30,6 +30,65 @@ def safe_fill_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             logger.warning(f"Kolon fillna atlandi: {col}", exc_info=True)
     return out
+
+
+def _text_contains_mask(series: pd.Series, value: str) -> pd.Series:
+    query = str(value or "").strip()
+    if not query:
+        return pd.Series(True, index=series.index)
+    try:
+        text = series.astype("string").fillna("").str.casefold()
+        return text.str.contains(re.escape(query.casefold()), regex=True, na=False)
+    except Exception:
+        text = series.astype(str).fillna("").str.lower()
+        return text.str.contains(re.escape(query.lower()), regex=True, na=False)
+
+
+def _coerce_preview_date(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, errors="coerce")
+    try:
+        parsed = pd.to_datetime(series, errors="coerce", dayfirst=True, format="mixed")
+    except TypeError:
+        parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    text = series.astype("string").str.strip()
+    iso_mask = text.str.match(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}", na=False)
+    if iso_mask.any():
+        try:
+            parsed.loc[iso_mask] = pd.to_datetime(series[iso_mask], errors="coerce", dayfirst=False, format="mixed")
+        except TypeError:
+            parsed.loc[iso_mask] = pd.to_datetime(series[iso_mask], errors="coerce", dayfirst=False)
+    missing = parsed.isna() & series.notna()
+    if missing.any():
+        numeric = pd.to_numeric(series[missing], errors="coerce")
+        excel_like = numeric.notna() & numeric.between(1, 2958465)
+        if excel_like.any():
+            parsed.loc[numeric[excel_like].index] = pd.to_datetime(
+                numeric[excel_like],
+                errors="coerce",
+                unit="D",
+                origin="1899-12-30",
+            )
+    return parsed
+
+
+def _preview_sort_key(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, errors="coerce")
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    numeric_ratio = numeric.notna().mean() if len(numeric) else 0
+    if numeric_ratio >= 0.75:
+        return numeric
+
+    dates = _coerce_preview_date(series)
+    date_ratio = dates.notna().mean() if len(dates) else 0
+    if date_ratio >= 0.75:
+        return dates
+
+    return series.astype("string").fillna("").str.casefold()
 
 # ─────────────────────────────────────────────────────────────
 # FileEntry: tek dosyanın meta + DataFrame'i
@@ -218,29 +277,44 @@ class DataStore:
             return [], [], 0
 
         if filters:
-            import re as _re
             mask = pd.Series(True, index=df.index)
             for col, val in filters.items():
-                if col in df.columns and val:
+                if val in ("", None):
+                    continue
+                if col == "__global":
+                    q = str(val).strip()
+                    if not q:
+                        continue
+                    global_mask = pd.Series(False, index=df.index)
+                    for c in df.columns:
+                        col_data = df[c]
+                        if isinstance(col_data, pd.DataFrame):
+                            col_data = col_data.iloc[:, 0]
+                        global_mask |= _text_contains_mask(col_data, q)
+                    mask &= global_mask
+                elif col in df.columns:
                     try:
                         col_data = df[col]
                         if isinstance(col_data, pd.DataFrame):
                             col_data = col_data.iloc[:, 0]
-                        mask &= col_data.astype(str).str.contains(
-                            _re.escape(str(val)), case=False, na=False)
-                    except Exception:
-                        pass
+                        mask &= _text_contains_mask(col_data, val)
+                    except Exception as e:
+                        logger.warning("Onizleme filtresi atlandi: %s=%s (%s)", col, val, e)
             df = df.loc[mask]
 
         if sort_col and sort_col in df.columns:
             try:
-                df = df.sort_values(sort_col, ascending=sort_asc)
-            except ValueError:
-                tmp_sort_col = "__jet_sort_key__"
                 sort_data = df[sort_col]
                 if isinstance(sort_data, pd.DataFrame):
                     sort_data = sort_data.iloc[:, 0]
-                df = df.assign(**{tmp_sort_col: sort_data}).sort_values(tmp_sort_col, ascending=sort_asc).drop(columns=[tmp_sort_col])
+                tmp_sort_col = "__jet_sort_key__"
+                df = (
+                    df.assign(**{tmp_sort_col: _preview_sort_key(sort_data)})
+                      .sort_values(tmp_sort_col, ascending=sort_asc, kind="mergesort", na_position="last")
+                      .drop(columns=[tmp_sort_col])
+                )
+            except Exception as e:
+                logger.warning("Onizleme siralamasi atlandi: %s (%s)", sort_col, e)
 
         total = len(df)
         chunk = df.iloc[page * per: (page + 1) * per]

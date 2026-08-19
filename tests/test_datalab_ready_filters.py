@@ -63,6 +63,25 @@ class DataLabReadyFilterTests(unittest.TestCase):
         })
         self.assertEqual(out["ID"].tolist(), [1, 2, 3, 6])
 
+    def test_preview_global_filter_and_smart_date_sort(self):
+        entry = FileEntry("preview_filters.xlsx", "virtual://preview_filters.xlsx")
+        entry.df = pd.DataFrame({
+            "ID": [1, 2, 3, 4],
+            "TARIH": ["31.01.2026 23:59", "2026-01-01", "15/01/2026", "2026-02-01"],
+            "ACIKLAMA": ["normal", "özel fatura", "test", "başka"],
+        })
+        entry.rows = len(entry.df)
+        entry.col_names = list(entry.df.columns)
+        entry.infer_types()
+        STORE.add_entry(entry)
+
+        cols, rows, total = STORE.query("preview_filters.xlsx", filters={"__global": "özel"})
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0]["ID"], "2")
+
+        cols, rows, total = STORE.query("preview_filters.xlsx", sort_col="TARIH", sort_asc=True)
+        self.assertEqual([r["ID"] for r in rows], ["2", "3", "1", "4"])
+
     def test_ready_filter_chain_and_account_codes(self):
         df = pd.DataFrame({
             "KEBIR": ["600.01", "601.01", "102.01", "770.01"],
