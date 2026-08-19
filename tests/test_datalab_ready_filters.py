@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 
 import pandas as pd
 
@@ -116,6 +117,31 @@ class DataLabReadyFilterTests(unittest.TestCase):
             self.assertEqual(list(loaded.columns), ["A", "B"])
             self.assertEqual(len(loaded), 0)
 
+    def test_export_task_uses_custom_output_path_and_extra_formats(self):
+        entry = FileEntry("custom_export.xlsx", "virtual://custom_export.xlsx")
+        entry.df = pd.DataFrame({"A": [1, 2], "Açıklama": ["Türkçe", None]})
+        entry.rows = len(entry.df)
+        entry.col_names = list(entry.df.columns)
+        entry.infer_types()
+        STORE.add_entry(entry)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            json_path = os.path.join(tmp, "denetim_sonuc.json")
+            result = _run_export_task("custom_export.xlsx", "csv", "utf-8-sig", tmp, output_path=json_path)
+            self.assertTrue(result["ok"])
+            self.assertTrue(os.path.exists(json_path), result)
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data[0]["Açıklama"], "Türkçe")
+
+            txt_base = os.path.join(tmp, "denetim_txt")
+            result = _run_export_task("custom_export.xlsx", "txt", "utf-8-sig", tmp, output_path=txt_base)
+            self.assertTrue(result["ok"])
+            txt_path = os.path.join(tmp, "denetim_txt.txt")
+            self.assertTrue(os.path.exists(txt_path), result)
+            with open(txt_path, "r", encoding="utf-8-sig") as f:
+                self.assertIn("Açıklama", f.read())
+
     def test_binary_export_endpoints_return_real_files(self):
         entry = FileEntry("binary.xlsx", "virtual://binary.xlsx")
         entry.df = pd.DataFrame({
@@ -146,6 +172,16 @@ class DataLabReadyFilterTests(unittest.TestCase):
         self.assertEqual(csv.status_code, 200)
         self.assertIn("text/csv", csv.content_type)
         self.assertIn("Türkçe değer", csv.data.decode("utf-8-sig"))
+
+        json_resp = client.post("/api/export/download", json={"fileName": "binary.xlsx", "format": "json", "outputName": "sonuc"})
+        self.assertEqual(json_resp.status_code, 200)
+        self.assertIn("application/json", json_resp.content_type)
+        self.assertEqual(json.loads(json_resp.data.decode("utf-8"))[0]["Açıklama"], "Türkçe değer")
+
+        txt = client.post("/api/export/download", json={"fileName": "binary.xlsx", "format": "txt", "outputName": "sonuc"})
+        self.assertEqual(txt.status_code, 200)
+        self.assertIn("text/plain", txt.content_type)
+        self.assertIn("Türkçe değer", txt.data.decode("utf-8-sig"))
 
     def test_filtered_xlsx_export_endpoint(self):
         entry = FileEntry("filtered.xlsx", "virtual://filtered.xlsx")

@@ -46,6 +46,39 @@ PENDING_UPLOADS = {}
 # Notebook durum yönetimi
 NOTEBOOK_ENVS = {} # {dataset_name: env_dict}
 
+EXPORT_FORMATS = {'xlsx', 'csv', 'txt', 'tsv', 'json', 'parquet'}
+EXPORT_EXTENSIONS = {
+    'xlsx': '.xlsx',
+    'csv': '.csv',
+    'txt': '.txt',
+    'tsv': '.tsv',
+    'json': '.json',
+    'parquet': '.parquet',
+}
+
+class DesktopBridge:
+    def choose_export_file(self, suggested_name='dataset', format='xlsx'):
+        try:
+            import webview
+            fmt = _normalize_export_format(format)
+            ext = EXPORT_EXTENSIONS[fmt]
+            safe_name = _safe_export_name(suggested_name)
+            save_filename = f"{safe_name}{ext}"
+            file_types = (f"{fmt.upper()} dosyası (*{ext})", "Tüm dosyalar (*.*)")
+            if not webview.windows:
+                return {'ok': False, 'error': 'Aktif pencere bulunamadı'}
+            result = webview.windows[0].create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=save_filename,
+                file_types=file_types,
+            )
+            if not result:
+                return {'ok': False, 'cancelled': True}
+            path = result[0] if isinstance(result, (list, tuple)) else result
+            return {'ok': True, 'path': path}
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
+
 def _out(name="JET_Ciktilari"):
     p = os.path.join(os.path.expanduser("~"), "Desktop", name)
     os.makedirs(p, exist_ok=True)
@@ -481,6 +514,7 @@ def api_append_export():
         format = d.get('format', 'csv')
         encoding = d.get('encoding', 'utf-8-sig')
         out_folder = _out(d.get('outputFolder', 'JET_Ciktilari'))
+        output_path = d.get('outputPath') or None
         
         if not file_name: return jsonify({'error': 'Dataset seçilmedi'}), 400
         
@@ -492,6 +526,7 @@ def api_append_export():
             encoding=encoding,
             out_folder=out_folder,
             output_name=d.get('outputName') or file_name,
+            output_path=output_path,
             priority=2
         )
         return jsonify({'ok': True, 'task_id': task_id})
@@ -530,33 +565,41 @@ def api_datalab_filter_export():
     except Exception as e:
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
-def _run_export_task(file_name, format, encoding, out_folder, output_name=None, _progress_cb=None):
+def _run_export_task(file_name, format, encoding, out_folder, output_name=None, output_path=None, _progress_cb=None):
     df = STORE.get_df(file_name)
     if df is None:
          return {'error': f'{file_name} bulunamadı'}
-    
-    if not os.path.isabs(str(out_folder or "")):
-        out_folder = _out(out_folder or 'JET_Ciktilari')
-    os.makedirs(out_folder, exist_ok=True)
-    safe_name = _safe_export_name(output_name or file_name)
-    base_path = os.path.join(out_folder, safe_name)
+
+    format, base_path = _resolve_export_target(format, out_folder, output_name or file_name, output_path)
     saved_paths = []
     total_rows = len(df)
     
     if format == 'csv':
-        out_path = f"{base_path}.csv"
+        out_path = _with_export_ext(base_path, 'csv')
         if _progress_cb: _progress_cb(50, "CSV yazılıyor...")
-        df.to_csv(out_path, index=False, encoding=encoding)
+        safe_fill_dataframe(df.copy()).to_csv(out_path, index=False, encoding=encoding)
         saved_paths.append(out_path)
     
     elif format == 'txt':
-        out_path = f"{base_path}.txt"
+        out_path = _with_export_ext(base_path, 'txt')
         if _progress_cb: _progress_cb(50, "TXT yazılıyor...")
-        df.to_csv(out_path, index=False, sep='\t', encoding=encoding)
+        safe_fill_dataframe(df.copy()).to_csv(out_path, index=False, sep='\t', encoding=encoding)
+        saved_paths.append(out_path)
+
+    elif format == 'tsv':
+        out_path = _with_export_ext(base_path, 'tsv')
+        if _progress_cb: _progress_cb(50, "TSV yazılıyor...")
+        safe_fill_dataframe(df.copy()).to_csv(out_path, index=False, sep='\t', encoding=encoding)
+        saved_paths.append(out_path)
+
+    elif format == 'json':
+        out_path = _with_export_ext(base_path, 'json')
+        if _progress_cb: _progress_cb(50, "JSON yazılıyor...")
+        safe_fill_dataframe(df.copy()).to_json(out_path, orient='records', force_ascii=False, indent=2, date_format='iso')
         saved_paths.append(out_path)
         
     elif format == 'parquet':
-        out_path = f"{base_path}.parquet"
+        out_path = _with_export_ext(base_path, 'parquet')
         if _progress_cb: _progress_cb(50, "Parquet yazılıyor...")
         df.to_parquet(out_path, index=False)
         saved_paths.append(out_path)
@@ -568,7 +611,7 @@ def _run_export_task(file_name, format, encoding, out_folder, output_name=None, 
         for i in range(num_chunks):
             chunk_df = df.iloc[i*chunk_size : (i+1)*chunk_size]
             part_suffix = f"_part{i+1}" if num_chunks > 1 else ""
-            out_path = f"{base_path}{part_suffix}.xlsx"
+            out_path = _with_export_ext(f"{base_path}{part_suffix}", 'xlsx')
             if _progress_cb: _progress_cb(int((i/num_chunks)*100), f"Excel part {i+1}/{num_chunks} yazılıyor...")
             _write_xlsx(chunk_df, out_path)
             saved_paths.append(out_path)
@@ -578,9 +621,50 @@ def _run_export_task(file_name, format, encoding, out_folder, output_name=None, 
     if _progress_cb: _progress_cb(100, "Dışa aktarma tamamlandı")
     return {'ok': True, 'savedTo': ", ".join(saved_paths)}
 
+def _resolve_export_target(format, out_folder, output_name=None, output_path=None):
+    fmt = _normalize_export_format(format)
+    target = str(output_path or "").strip().strip('"')
+
+    if target:
+        target = os.path.expanduser(os.path.expandvars(target))
+        path_ext = os.path.splitext(target)[1].lower()
+        if path_ext in EXPORT_EXTENSIONS.values():
+            fmt = next(k for k, v in EXPORT_EXTENSIONS.items() if v == path_ext)
+            base_path = os.path.splitext(target)[0]
+        elif target.endswith(("\\", "/")) or os.path.isdir(target):
+            safe_name = _safe_export_name(output_name or "dataset")
+            base_path = os.path.join(target, safe_name)
+        else:
+            base_path = target
+
+        if not os.path.isabs(base_path):
+            base_path = os.path.join(_out(out_folder or 'JET_Ciktilari'), base_path)
+    else:
+        if not os.path.isabs(str(out_folder or "")):
+            out_folder = _out(out_folder or 'JET_Ciktilari')
+        safe_name = _safe_export_name(output_name or "dataset")
+        base_path = os.path.join(out_folder, safe_name)
+
+    parent = os.path.dirname(base_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    return fmt, base_path
+
+def _normalize_export_format(format):
+    fmt = str(format or 'xlsx').strip().lower().lstrip('.')
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError(f'Geçersiz format: {format}')
+    return fmt
+
+def _with_export_ext(base_path, format):
+    root, current_ext = os.path.splitext(base_path)
+    if current_ext.lower() in EXPORT_EXTENSIONS.values():
+        return f"{root}{EXPORT_EXTENSIONS[format]}"
+    return f"{base_path}{EXPORT_EXTENSIONS[format]}"
+
 def _safe_export_name(file_name):
     name = os.path.basename(str(file_name or "dataset"))
-    name = re.sub(r"\.(xlsx|xlsm|xls|csv|txt|tsv|parquet)(?=$|_)", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\.(xlsx|xlsm|xls|csv|txt|tsv|json|parquet)(?=$|_)", "", name, flags=re.IGNORECASE)
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" ._")
     return name[:160] or "dataset"
 
@@ -607,6 +691,7 @@ def _write_xlsx_buffer(df):
     return bio
 
 def _send_dataframe_export(df, file_name, fmt='xlsx', encoding='utf-8-sig'):
+    fmt = _normalize_export_format(fmt)
     safe_name = _safe_export_name(file_name)
     if fmt == 'xlsx':
         bio = _write_xlsx_buffer(df)
@@ -625,7 +710,25 @@ def _send_dataframe_export(df, file_name, fmt='xlsx', encoding='utf-8-sig'):
             download_name=f"{safe_name}.csv",
             mimetype='text/csv; charset=utf-8',
         )
-    return jsonify({'error': 'Geçersiz format'}), 400
+    if fmt in ('txt', 'tsv'):
+        data = safe_fill_dataframe(df.copy()).to_csv(index=False, sep='\t', encoding=encoding)
+        bio = io.BytesIO(data.encode(encoding or 'utf-8-sig'))
+        return send_file(
+            bio,
+            as_attachment=True,
+            download_name=f"{safe_name}.{fmt}",
+            mimetype='text/plain; charset=utf-8' if fmt == 'txt' else 'text/tab-separated-values; charset=utf-8',
+        )
+    if fmt == 'json':
+        data = safe_fill_dataframe(df.copy()).to_json(orient='records', force_ascii=False, indent=2, date_format='iso')
+        bio = io.BytesIO(data.encode('utf-8'))
+        return send_file(
+            bio,
+            as_attachment=True,
+            download_name=f"{safe_name}.json",
+            mimetype='application/json; charset=utf-8',
+        )
+    return jsonify({'error': 'Bu format doğrudan indirme için desteklenmiyor'}), 400
 
 
 # ── Analizler ────────────────────────────────────────────────
@@ -1263,7 +1366,8 @@ if __name__ == '__main__':
         time.sleep(1.2)
         webview.create_window('JET Otomasyon Aracı v4.3', 'http://127.0.0.1:5757',
                               width=1280, height=860,
-                              min_size=(960, 680), resizable=True)
+                              min_size=(960, 680), resizable=True,
+                              js_api=DesktopBridge())
         webview.start()
     except ImportError:
         threading.Thread(target=run_flask, daemon=True).start()

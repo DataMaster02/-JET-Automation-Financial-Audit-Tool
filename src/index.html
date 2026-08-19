@@ -553,6 +553,11 @@ const S = {
 
   // append
   appendSelected:[], appendNewName:'',
+  appendExportTargetOpen:false,
+  appendExportPath:'',
+  appendExportFolder:'JET_Ciktilari',
+  appendExportName:'',
+  appendExportFormat:'xlsx',
 
   // jet süreçleri
   userCol:'', borcCol:'', alacakCol:'', tutarKols:[],
@@ -3707,7 +3712,7 @@ function renderAppend() {
 
       <div class="fg">
         <div class="fl">Dışa Aktarılacak Dataset</div>
-        <select id="exportDataset" style="font-weight:600; padding:10px;" onchange="document.getElementById('exportFileName').value=datasetBaseName(this.value)">
+        <select id="exportDataset" style="font-weight:600; padding:10px;" onchange="S.appendExportName=datasetBaseName(this.value); document.getElementById('exportFileName').value=S.appendExportName">
            <option value="">Seçiniz...</option>
            ${S.fileInfos.map(f => `<option value="${esc(f.name)}">${esc(f.name)} (${f.rows.toLocaleString('tr-TR')} satır)</option>`).join('')}
         </select>
@@ -3715,15 +3720,19 @@ function renderAppend() {
 
       <div class="fg">
         <div class="fl">Dosya Adı</div>
-        <input id="exportFileName" type="text" placeholder="Dosya adı boşsa dataset adı kullanılır">
+        <input id="exportFileName" type="text" value="${esc(S.appendExportName)}" oninput="S.appendExportName=this.value" placeholder="Dosya adı boşsa dataset adı kullanılır">
       </div>
 
       <div class="c2" style="gap:10px;">
           <div class="fg" style="margin:0;">
             <div class="fl">Format</div>
-            <select id="exportFormat" style="padding:10px;">
-              <option value="xlsx">XLSX olarak dışa aktar</option>
-              <option value="csv">CSV olarak dışa aktar</option>
+            <select id="exportFormat" style="padding:10px;" onchange="S.appendExportFormat=this.value; syncAppendExportExtension()">
+              <option value="xlsx" ${S.appendExportFormat==='xlsx'?'selected':''}>XLSX olarak dışa aktar</option>
+              <option value="csv" ${S.appendExportFormat==='csv'?'selected':''}>CSV olarak dışa aktar</option>
+              <option value="txt" ${S.appendExportFormat==='txt'?'selected':''}>TXT olarak dışa aktar</option>
+              <option value="tsv" ${S.appendExportFormat==='tsv'?'selected':''}>TSV olarak dışa aktar</option>
+              <option value="json" ${S.appendExportFormat==='json'?'selected':''}>JSON olarak dışa aktar</option>
+              <option value="parquet" ${S.appendExportFormat==='parquet'?'selected':''}>Parquet olarak dışa aktar</option>
             </select>
           </div>
           <div class="fg" style="margin:0;">
@@ -3736,11 +3745,44 @@ function renderAppend() {
             </select>
           </div>
       </div>
-      <div class="help" style="margin-bottom:16px;">Excel (XLSX) formatında 1 milyon satır sınırı aşıldığında dosya otomatik olarak part1, part2 şeklinde bölünür.</div>
+      <div class="help" style="margin-bottom:12px;">Excel (XLSX) formatında 1 milyon satır sınırı aşıldığında dosya otomatik olarak part1, part2 şeklinde bölünür.</div>
+
+      <div style="border:1px solid var(--bd); border-radius:var(--r); padding:12px; margin-bottom:14px; background:#f8fafc;">
+        <div class="arow" style="justify-content:space-between; margin:0;">
+          <div>
+            <div style="font-weight:700; color:var(--tx);">Export Hedefi</div>
+            <div class="help" style="margin:2px 0 0;">Klasör adı, tam dosya yolu veya Windows kaydetme penceresi kullanabilirsiniz.</div>
+          </div>
+          <button class="btn sm" onclick="S.appendExportTargetOpen=!S.appendExportTargetOpen; render()">${S.appendExportTargetOpen ? 'Gizle' : 'Dosya Yeri Seç'}</button>
+        </div>
+        ${S.appendExportTargetOpen ? `
+          <div class="c2" style="gap:10px; margin-top:12px;">
+            <div class="fg" style="margin:0;">
+              <div class="fl">Çıktı Klasörü</div>
+              <input id="exportFolder" type="text" value="${esc(S.appendExportFolder || S.outputFolder || 'JET_Ciktilari')}" oninput="S.appendExportFolder=this.value" placeholder="JET_Ciktilari veya C:\\Raporlar">
+            </div>
+            <div class="fg" style="margin:0;">
+              <div class="fl">Tam Dosya Yolu <span class="opt">(opsiyonel)</span></div>
+              <input id="exportOutputPath" type="text" value="${esc(S.appendExportPath)}" oninput="S.appendExportPath=this.value; syncAppendExportFormatFromPath()" placeholder="C:\\Raporlar\\muavin_export.xlsx">
+            </div>
+          </div>
+          <div class="arow" style="margin-top:10px;">
+            <button class="btn" onclick="chooseAppendExportFile()">Dosya Seç / Kaydet</button>
+            <button class="btn" onclick="document.getElementById('appendExportFileFallback').click()">Mevcut Dosyadan Ad Al</button>
+            <button class="btn rd" onclick="clearAppendExportTarget()">Temizle</button>
+            <input id="appendExportFileFallback" type="file" style="display:none" onchange="setAppendExportPathFromFile(this)" accept=".xlsx,.csv,.txt,.tsv,.json,.parquet">
+          </div>
+          <div class="help" style="margin-top:8px;">
+            Tam dosya yolu girilirse klasör ve dosya adı yerine bu yol kullanılır. Uzantı yazarsanız format otomatik bu uzantıya göre güncellenir.
+          </div>
+        ` : ''}
+      </div>
 
       <div class="arow" style="margin-bottom:10px;">
         <button class="btn gr" onclick="downloadDatasetExport('xlsx')" ${S.fileInfos.length > 0 && !S.L.export ? '' : 'disabled'}>XLSX Olarak Dışa Aktar</button>
         <button class="btn" onclick="downloadDatasetExport('csv')" ${S.fileInfos.length > 0 && !S.L.export ? '' : 'disabled'}>CSV Olarak Dışa Aktar</button>
+        <button class="btn" onclick="downloadDatasetExport('json')" ${S.fileInfos.length > 0 && !S.L.export ? '' : 'disabled'}>JSON İndir</button>
+        <button class="btn" onclick="downloadDatasetExport('txt')" ${S.fileInfos.length > 0 && !S.L.export ? '' : 'disabled'}>TXT İndir</button>
       </div>
       <button class="btn gr" onclick="runExport()" ${S.fileInfos.length > 0 && !S.L.export ? '' : 'disabled'} style="width:100%; font-size:15px; padding:12px;">
         ${S.L.export ? '<div class="spin" style="width:16px;height:16px;border-width:2px;margin-right:8px;"></div> Dışa Aktarılıyor...' : '⬇️ Seçili Formatta Çıkart'}
@@ -3782,16 +3824,89 @@ async function runAppend() {
     S.L.append = false; render();
 }
 
+const EXPORT_EXT = {xlsx:'.xlsx', csv:'.csv', txt:'.txt', tsv:'.tsv', json:'.json', parquet:'.parquet'};
+
+function appendExportNameBase() {
+  const fileName = document.getElementById('exportDataset')?.value || S.activeFileName || 'dataset';
+  return document.getElementById('exportFileName')?.value || S.appendExportName || datasetBaseName(fileName);
+}
+
+function syncAppendExportExtension() {
+  const pathInput = document.getElementById('exportOutputPath');
+  if (!pathInput || !pathInput.value.trim()) return;
+  const ext = EXPORT_EXT[S.appendExportFormat || 'xlsx'] || '.xlsx';
+  const next = pathInput.value.replace(/\.(xlsx|csv|txt|tsv|json|parquet)$/i, '') + ext;
+  pathInput.value = next;
+  S.appendExportPath = next;
+}
+
+function syncAppendExportFormatFromPath() {
+  const path = document.getElementById('exportOutputPath')?.value || S.appendExportPath || '';
+  const m = path.match(/\.([a-z0-9]+)$/i);
+  if (!m) return;
+  const fmt = m[1].toLowerCase();
+  if (!EXPORT_EXT[fmt]) return;
+  S.appendExportFormat = fmt;
+  const select = document.getElementById('exportFormat');
+  if (select) select.value = fmt;
+}
+
+async function chooseAppendExportFile() {
+  const format = document.getElementById('exportFormat')?.value || S.appendExportFormat || 'xlsx';
+  const suggested = appendExportNameBase();
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.choose_export_file) {
+    const result = await window.pywebview.api.choose_export_file(suggested, format);
+    if (result && result.ok && result.path) {
+      S.appendExportPath = result.path;
+      const input = document.getElementById('exportOutputPath');
+      if (input) input.value = result.path;
+      syncAppendExportFormatFromPath();
+      render();
+      return;
+    }
+    if (result && result.cancelled) return;
+    alert((result && result.error) || 'Dosya seçme penceresi açılamadı. Dosya yolunu elle girebilirsiniz.');
+    return;
+  }
+  alert('Tarayıcı modunda Windows kaydetme penceresi açılamaz. Tam dosya yolunu elle girin veya mevcut dosyadan ad alın.');
+}
+
+function setAppendExportPathFromFile(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const rawValue = input.value || '';
+  const picked = rawValue && !rawValue.includes('fakepath') ? rawValue : file.name;
+  S.appendExportPath = picked;
+  const pathInput = document.getElementById('exportOutputPath');
+  if (pathInput) pathInput.value = picked;
+  syncAppendExportFormatFromPath();
+}
+
+function clearAppendExportTarget() {
+  S.appendExportPath = '';
+  S.appendExportFolder = S.outputFolder || 'JET_Ciktilari';
+  const pathInput = document.getElementById('exportOutputPath');
+  const folderInput = document.getElementById('exportFolder');
+  if (pathInput) pathInput.value = '';
+  if (folderInput) folderInput.value = S.appendExportFolder;
+}
+
 async function runExport() {
   const file_name = document.getElementById('exportDataset').value;
-  const format = document.getElementById('exportFormat').value;
+  const format = document.getElementById('exportFormat').value || S.appendExportFormat || 'xlsx';
   const encoding = document.getElementById('exportEncoding').value;
-  const outputName = document.getElementById('exportFileName')?.value || datasetBaseName(file_name);
+  const outputName = appendExportNameBase();
+  const outputFolder = document.getElementById('exportFolder')?.value || S.appendExportFolder || S.outputFolder;
+  const outputPath = document.getElementById('exportOutputPath')?.value || S.appendExportPath || '';
 
   if (!file_name) {
       alert("Lütfen dışa aktarılacak dataseti seçin.");
       return;
   }
+  S.appendExportFormat = format;
+  S.appendExportFolder = outputFolder;
+  S.appendExportPath = outputPath;
+  S.appendExportName = outputName;
 
   S.L.export = true; render();
   try {
@@ -3799,8 +3914,9 @@ async function runExport() {
       fileName: file_name,
       format: format,
       encoding: encoding,
-      outputFolder: S.outputFolder,
-      outputName
+      outputFolder,
+      outputName,
+      outputPath
     });
 
     if (d.error) {

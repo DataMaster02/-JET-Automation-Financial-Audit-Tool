@@ -224,6 +224,10 @@ Desteklenen seçenekler:
 
 - XLSX olarak dışa aktar
 - CSV olarak dışa aktar
+- TXT olarak dışa aktar
+- TSV olarak dışa aktar
+- JSON olarak dışa aktar
+- Parquet olarak dışa aktar
 
 XLSX export gerçek Excel workbook formatında oluşturulur. Sadece dosya uzantısı değiştirilmez.
 
@@ -235,6 +239,14 @@ Export sırasında:
 - Null ve NaN değerler hata oluşturmadan boş hücreye dönüştürülür.
 - Dosya adı boş bırakılırsa dataset adına göre otomatik oluşturulur.
 - `.xlsx.xlsx` gibi çift uzantı oluşması engellenir.
+
+Append & Export ekranında ayrıca `Export Hedefi` alanı kullanılabilir:
+
+1. `Dosya Yeri Seç` ile hedef panelini açın.
+2. Sadece klasör adı girerseniz dosya seçilen klasöre kaydedilir.
+3. Tam dosya yolu girerseniz çıktı doğrudan o dosyaya yazılır. Örnek: `C:\Raporlar\muavin_export.json`
+4. Masaüstü uygulaması PyWebView ile çalışıyorsa `Dosya Seç / Kaydet` butonu Windows kaydetme penceresini açar.
+5. Yazılan dosya uzantısı seçilen formatı otomatik belirleyebilir. Örnek: `.json` yazılırsa JSON export yapılır.
 
 ---
 
@@ -271,6 +283,10 @@ Export sırasında:
 |--------|--------------|----------|
 | XLSX | `Dataset_Adi.xlsx` | Gerçek Excel workbook formatında oluşturulur; Excel ile doğrudan açılabilir |
 | CSV | `Dataset_Adi.csv` | UTF-8 BOM destekli CSV çıktısıdır; Türkçe karakterler korunur |
+| TXT | `Dataset_Adi.txt` | Tab karakteriyle ayrılmış metin çıktısıdır |
+| TSV | `Dataset_Adi.tsv` | Tab-separated value formatında metin çıktısıdır |
+| JSON | `Dataset_Adi.json` | Kayıtları JSON liste formatında dışa aktarır; Türkçe karakterler korunur |
+| Parquet | `Dataset_Adi.parquet` | Büyük veri işleme için kolon bazlı Parquet çıktısıdır |
 | Filtrelenmiş XLSX | `Dataset_Adi_Filtre.xlsx` | Hızlı filtre veya manuel filtre sonucunda eşleşen kayıtları içerir |
 | Filtrelenmiş CSV | `Dataset_Adi_Filtre.csv` | Filtre sonucunu CSV formatında indirir |
 
