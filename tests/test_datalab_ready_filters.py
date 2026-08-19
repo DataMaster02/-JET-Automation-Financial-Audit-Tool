@@ -82,6 +82,39 @@ class DataLabReadyFilterTests(unittest.TestCase):
         cols, rows, total = STORE.query("preview_filters.xlsx", sort_col="TARIH", sort_asc=True)
         self.assertEqual([r["ID"] for r in rows], ["2", "3", "1", "4"])
 
+    def test_debit_credit_split_ready_filter(self):
+        df = pd.DataFrame({
+            "TUTAR": [125.50, -75.25, 0, None],
+            "BORC": [10.10, None, 0, 5.55],
+            "ALACAK": [None, 3.30, 0, 0],
+        })
+
+        single = apply_column_tools(df, {
+            "op": "ready_filter",
+            "filter_id": "debit_credit_split",
+            "filter_name": "Borc-Alacak Kolon Ayrımı",
+            "params": {
+                "amount_structure": "single",
+                "amount_col": "TUTAR",
+                "single_amount_direction": "positive_debit",
+            },
+        })
+        self.assertEqual(single["CALC_DEBIT"].tolist(), [125.50, 0.0, 0.0, 0.0])
+        self.assertEqual(single["CALC_CREDIT"].tolist(), [0.0, 75.25, 0.0, 0.0])
+
+        separate = apply_column_tools(df, {
+            "op": "ready_filter",
+            "filter_id": "debit_credit_split",
+            "filter_name": "Borc-Alacak Kolon Ayrımı",
+            "params": {
+                "amount_structure": "separate",
+                "debit_col": "BORC",
+                "credit_col": "ALACAK",
+            },
+        })
+        self.assertEqual(separate["CALC_DEBIT"].tolist(), [10.10, 0.0, 0.0, 5.55])
+        self.assertEqual(separate["CALC_CREDIT"].tolist(), [0.0, 3.30, 0.0, 0.0])
+
     def test_ready_filter_chain_and_account_codes(self):
         df = pd.DataFrame({
             "KEBIR": ["600.01", "601.01", "102.01", "770.01"],

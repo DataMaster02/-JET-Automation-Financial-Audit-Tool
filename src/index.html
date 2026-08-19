@@ -2065,6 +2065,19 @@ function readyFilterSchemas() {
     {id:'journal_risk', title:'Yevmiye kaydi risk analizi', desc:'Manuel, mesai disi, yuksek tutar, kisa aciklama ve generic kullanici risk skoru.', category:'Finansal Denetim', dtypes:['text','numeric','date'], minCols:0, maxCols:0, methods:['risk'], params:[pColumn('amount_col','Tutar kolonu'), pColumn('description_col','Aciklama kolonu'), pColumn('user_col','Kullanici kolonu'), pColumn('datetime_col','Tarih-saat kolonu'), pDecimal('high_amount','Yuksek tutar esigi',100000), pNumber('min_score','Minimum risk skoru',20)]},
     {id:'period_end', title:'Donem sonu kayitlari', desc:'Donem bitisinden once/sonra belirlenen gun araligindaki kayitlar.', category:'Finansal Denetim', dtypes:['date'], minCols:1, maxCols:4, methods:['any','all'], params:[pDate('period_end','Donem bitis tarihi',''), pNumber('days_before','Onceki N gun',7), pNumber('days_after','Sonraki N gun',0)]},
     {id:'round_amounts', title:'Yuvarlak tutarlar', desc:'10, 100, 1000 gibi katlara denk gelen tutarlari bulur.', category:'Finansal Denetim', dtypes:['numeric'], minCols:1, maxCols:12, methods:['any','row_sum'], params:[pDecimal('multiple','Kat',1000), pDecimal('min_amount','Minimum tutar',0), pBool('absolute','Mutlak deger kullan',true)]},
+    {id:'debit_credit_split', title:'Borc-Alacak Kolon Ayrımı', desc:'Ayrı borç/alacak kolonlarını veya tek işaretli tutar kolonunu CALC_DEBIT ve CALC_CREDIT kolonlarına dönüştürür.', category:'Finansal Denetim', dtypes:['numeric'], minCols:0, maxCols:0, methods:['normalize'], params:[
+      pSelect('amount_structure','Tutar Yapısı',[
+        ['separate','Borç ve Alacak ayrı kolonlarda'],
+        ['single','Tek tutar kolonunda']
+      ],'single'),
+      pColumn('debit_col','Borç kolonu'),
+      pColumn('credit_col','Alacak kolonu'),
+      pColumn('amount_col','Tek tutar kolonu'),
+      pSelect('single_amount_direction','Tek tutar yönü',[
+        ['positive_debit','Pozitif = Borç, Negatif = Alacak'],
+        ['negative_debit','Negatif = Borç, Pozitif = Alacak']
+      ],'positive_debit')
+    ]},
     {id:'debit_credit_imbalance', title:'Borc ve alacak dengesizligi', desc:'Fis bazinda borc ve alacak toplam farklarini bulur.', category:'Finansal Denetim', dtypes:['numeric','text'], minCols:0, maxCols:0, methods:['group'], params:[pColumn('voucher_col','Fis numarasi'), pColumn('debit_col','Borc kolonu'), pColumn('credit_col','Alacak kolonu'), pDecimal('tolerance','Tolerans',0)]},
     {id:'benford', title:'Benford analizi', desc:'Tutar kolonunda ilk basamak sapmasi olan kayitlari isaretler.', category:'Finansal Denetim', dtypes:['numeric'], minCols:1, maxCols:1, methods:['any'], params:[pDecimal('min_amount','Minimum tutar',1)]},
     {id:'suspicious_keywords', title:'Supheli aciklama ve anahtar kelime', desc:'Denetim acisindan riskli aciklama kelimelerini arar.', category:'Finansal Denetim', dtypes:['text'], minCols:1, maxCols:8, methods:['any','all','combined_text'], params:[pList('keywords','Anahtar kelimeler','düzeltme\\ncorrection\\nmanuel\\nmanual\\nbonus\\nikramiye\\nhediye\\ngift\\nacil\\nurgent\\nözel\\nfark\\nadjustment\\nmisc\\nmiscellaneous\\ndiğer\\ngeçici\\navans\\nemanet\\niptal\\ngeri ödeme'), pBool('case_sensitive','Buyuk/kucuk harf duyarli',false)]}
@@ -2197,7 +2210,8 @@ function renderReadyColumnMethod(schema) {
     any:'Herhangi biri eslessin', all:'Tumu eslessin', separate:'Her kolonu ayri analiz et',
     combined_text:'Kolonlari birlestirerek analiz et', first_non_empty:'Ilk bos olmayan degeri kullan',
     compare_columns:'Kolonlari birbirleriyle karsilastir', row_sum:'Satir toplami uzerinden',
-    row_diff:'Satir farki uzerinden', combination:'Kolon kombinasyonu', group:'Grup bazli analiz', risk:'Risk skoru'
+    row_diff:'Satir farki uzerinden', combination:'Kolon kombinasyonu', group:'Grup bazli analiz', risk:'Risk skoru',
+    normalize:'Borç/Alacak normalizasyonu'
   };
   const selected = S.readyFilterColumnMethod[schema.id] || methods[0];
   return `<div class="fg"><div class="fl">Kolonlar Arasi Calisma Yontemi</div><select onchange="S.readyFilterColumnMethod['${schema.id}']=this.value;render()">${methods.map(m=>`<option value="${m}" ${selected===m?'selected':''}>${labels[m] || m}</option>`).join('')}</select></div>`;
@@ -2247,6 +2261,11 @@ function readyFilterSummary(schema) {
   if (schema.id === 'duplicates') return `${colText} kombinasyonuna gore tekrar eden kayitlar ve duplicate grup bilgisi getirilecektir.`;
   if (schema.id === 'date_between') return `${colText} alaninda ${params.start_date || 'baslangic'} ile ${params.end_date || 'bitis'} arasindaki kayitlar getirilecektir.`;
   if (schema.id === 'after_hours') return `${colText} alaninda ${params.work_start || '08:00'} oncesi veya ${params.work_end || '18:00'} sonrasi kayitlar getirilecektir.`;
+  if (schema.id === 'debit_credit_split') {
+    if ((params.amount_structure || 'single') === 'separate') return `${params.debit_col || 'Borç kolonu'} ve ${params.credit_col || 'Alacak kolonu'} kullanılarak CALC_DEBIT ve CALC_CREDIT kolonları oluşturulacaktır.`;
+    const direction = params.single_amount_direction === 'negative_debit' ? 'negatif değerler borç, pozitif değerler alacak' : 'pozitif değerler borç, negatif değerler alacak';
+    return `${params.amount_col || 'Tek tutar kolonu'} alanında ${direction} kabul edilerek CALC_DEBIT ve CALC_CREDIT kolonları oluşturulacaktır.`;
+  }
   if (schema.id === 'short_text') return `${colText} kolonlarindan ${methodText} ${params.max_len || 5} karakterden kisa metin iceren kayitlar getirilecektir.`;
   if (schema.id === 'top_n') return `${colText} kolonlarinda en yuksek ${params.n || 10} kayit getirilecektir.`;
   if (schema.id === 'random_n') return `${params.n || 10} kayitlik tekrar uretilebilir orneklem olusturulacaktir.`;
@@ -2292,6 +2311,13 @@ function validateReadyFilterConfig(schema, cols, params) {
   }
   if (schema.id === 'amount_between' && (params.min_amount === '' || params.max_amount === '')) errors.push('Tutar araligi icin minimum ve maksimum tutar girin.');
   if (['date_between','date_range'].includes(schema.id) && (!params.start_date || !params.end_date)) errors.push('Tarih araligi icin baslangic ve bitis tarihi girin.');
+  if (schema.id === 'debit_credit_split') {
+    if ((params.amount_structure || 'single') === 'separate') {
+      if (!params.debit_col || !params.credit_col) errors.push('Borç ve Alacak ayrı kolonlarda seçeneği için Borç ve Alacak kolonlarını seçin.');
+    } else if (!params.amount_col) {
+      errors.push('Tek tutar kolonunda seçeneği için tutar kolonunu seçin.');
+    }
+  }
   return errors;
 }
 

@@ -570,6 +570,42 @@ def _with_helpers(df, mask, helpers=None, include_helpers=True):
     return out
 
 
+def _apply_debit_credit_split_filter(df: pd.DataFrame, params: dict, filter_name: str, include_helpers=True) -> pd.DataFrame:
+    amount_structure = str(params.get("amount_structure") or "single").lower()
+    out = df.copy()
+
+    if amount_structure == "separate":
+        debit_col = params.get("debit_col")
+        credit_col = params.get("credit_col")
+        if debit_col not in df.columns or credit_col not in df.columns:
+            raise ValueError("Borç ve Alacak ayrı kolonlarda seçeneği için Borç ve Alacak kolonlarını seçin")
+        debit = _coerce_numeric(df[debit_col]).fillna(0)
+        credit = _coerce_numeric(df[credit_col]).fillna(0)
+        source_note = f"Ayrı kolonlar: {debit_col} / {credit_col}"
+    else:
+        amount_col = params.get("amount_col")
+        if amount_col not in df.columns:
+            raise ValueError("Tek tutar kolonunda seçeneği için tutar kolonunu seçin")
+        amount = _coerce_numeric(df[amount_col]).fillna(0)
+        direction = str(params.get("single_amount_direction") or "positive_debit").lower()
+        if direction == "negative_debit":
+            debit = amount.where(amount < 0, 0).abs()
+            credit = amount.where(amount > 0, 0).abs()
+            source_note = f"Tek kolon: {amount_col}; negatif=borç, pozitif=alacak"
+        else:
+            debit = amount.where(amount > 0, 0).abs()
+            credit = amount.where(amount < 0, 0).abs()
+            source_note = f"Tek kolon: {amount_col}; pozitif=borç, negatif=alacak"
+
+    out["CALC_DEBIT"] = _finite_series(debit)
+    out["CALC_CREDIT"] = _finite_series(credit)
+    if include_helpers:
+        out["Filtre Adı"] = filter_name
+        out["Kontrol Sonucu"] = "Borç/Alacak kolonları hesaplandı"
+        out["Eşleşme Nedeni"] = source_note
+    return out
+
+
 def _blank_mask_for_series(s, params):
     text = _normalize_text_series(
         s,
@@ -612,7 +648,7 @@ def _apply_ready_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     cols = [c for c in _ready_cols(config) if c in df.columns]
     method = config.get("column_method") or params.get("column_method") or "any"
     include_helpers = config.get("include_helpers", True)
-    if not cols and filter_id not in {"journal_risk", "debit_credit_imbalance", "split_transaction", "single_leg_voucher", "creator_approver_same", "user_intensity", "same_day_same_amount", "after_hours_high_amount"}:
+    if not cols and filter_id not in {"journal_risk", "debit_credit_split", "debit_credit_imbalance", "split_transaction", "single_leg_voucher", "creator_approver_same", "user_intensity", "same_day_same_amount", "after_hours_high_amount"}:
         raise ValueError("Hazir filtre icin en az bir kolon secin")
 
     def text_masks(op, value="", values=None, reason=""):
@@ -651,6 +687,9 @@ def _apply_ready_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
         mask = ~equal if params.get("comparison", "different") == "different" else equal
         helpers = pd.DataFrame({"Filtre Adı": filter_name, "Kontrol Sonucu": np.where(mask, "Kolonlar karşılaştırıldı", "")}, index=df.index)
         return _with_helpers(df, mask, helpers, include_helpers)
+
+    if filter_id == "debit_credit_split":
+        return _apply_debit_credit_split_filter(df, params, filter_name, include_helpers)
 
     if filter_id in {"empty_document", "empty_description"}:
         filter_id = "empty"
