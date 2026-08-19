@@ -320,17 +320,31 @@ input[type=text]:focus,select:focus,.kwi:focus{border-color:var(--pu); box-shado
 .multi-values textarea{width:100%;min-height:76px;border:1px solid var(--bd);border-radius:6px;padding:8px;font-family:inherit;font-size:12px;resize:vertical}
 .chipline{display:flex;flex-wrap:wrap;gap:5px;max-height:74px;overflow:auto;margin-top:7px}
 .value-chip{font-size:11px;font-weight:700;background:var(--pl);color:#084298;border:1px solid #b6d4fe;border-radius:14px;padding:3px 7px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.quick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
-.quick-card{border:1px solid var(--bd);background:#fff;border-radius:8px;padding:10px;cursor:pointer;min-height:66px}
-.quick-card:hover,.quick-card.active{border-color:#b6d4fe;background:var(--pl);color:#084298}
-.quick-title{font-size:13px;font-weight:800;margin-bottom:4px}
-.quick-desc{font-size:11px;color:var(--mu);line-height:1.35}
-.dl-main .quick-grid{display:flex;gap:10px;overflow-x:auto;padding:2px 0 14px;border-bottom:1px solid #e8edf4}
-.dl-main .quick-card{min-height:auto;padding:9px 16px;border-radius:7px;background:#f3f5f8;white-space:nowrap;box-shadow:0 1px 2px rgba(15,23,42,.04)}
-.dl-main .quick-card.active{background:#2563eb;border-color:#2563eb;color:#fff}
-.dl-main .quick-card.active .quick-desc{color:rgba(255,255,255,.82)}
-.dl-main .quick-title{margin:0;font-size:13px}
-.dl-main .quick-desc{display:none}
+.quick-filter-shell{border:1px solid #d8e0ea;background:#f8fafc;border-radius:8px;padding:12px}
+.quick-filter-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+.quick-filter-title{font-size:18px;font-weight:900;color:#172033;letter-spacing:0}
+.quick-filter-sub{font-size:12px;color:#667085;font-weight:700;margin-top:4px}
+.quick-search-row{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:8px;align-items:center;margin-bottom:10px}
+.quick-meta-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.quick-meta-chip{border:1px solid #d8e0ea;background:#fff;border-radius:16px;padding:5px 9px;font-size:11px;font-weight:800;color:#475467}
+.quick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:10px;max-height:520px;overflow:auto;padding:2px 4px 2px 2px}
+.quick-card{border:1px solid #d8e0ea;background:#fff;border-radius:8px;padding:12px;cursor:pointer;min-height:132px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(15,23,42,.04);width:100%;text-align:left;font-family:inherit}
+.quick-card:hover{border-color:#93b4ff;background:#f5f8ff;box-shadow:0 8px 18px rgba(37,99,235,.12);transform:translateY(-1px)}
+.quick-card.active{border-color:#2563eb;background:#eef5ff;box-shadow:0 0 0 2px rgba(37,99,235,.12),0 8px 18px rgba(37,99,235,.13)}
+.quick-card-top{display:flex;align-items:flex-start;gap:9px}
+.quick-icon{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:#eef4ff;border:1px solid #c9dcff;color:#1d4ed8;font-size:15px;font-weight:900;flex:0 0 auto}
+.quick-card.active .quick-icon{background:#2563eb;border-color:#2563eb;color:#fff}
+.quick-title{font-size:14px;font-weight:900;margin-bottom:3px;color:#182230;line-height:1.2}
+.quick-desc{font-size:12px;color:#667085;line-height:1.35;font-weight:600}
+.quick-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:auto}
+.quick-badge{font-size:10px;font-weight:900;border:1px solid #e1e7ef;background:#f8fafc;color:#475467;border-radius:14px;padding:3px 7px;text-transform:uppercase}
+.quick-badge.audit{background:#fff1f2;border-color:#fecdd3;color:#be123c}
+.quick-badge.amount{background:#ecfdf3;border-color:#bbf7d0;color:#15803d}
+.quick-badge.time{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.quick-badge.text{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+.quick-empty-result{border:1px dashed #cfd7e3;border-radius:8px;background:#fff;padding:18px;color:#667085;font-weight:800;text-align:center}
+.quick-param-panel{border:1px solid #cfd9e7;border-radius:8px;background:#fff;padding:14px;box-shadow:0 8px 20px rgba(15,23,42,.06)}
+.quick-param-selected{display:inline-flex;align-items:center;gap:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:18px;padding:5px 10px;font-size:12px;font-weight:900;margin-bottom:7px}
 .dl-main .filter-preview-box{height:100%}
 .dl-main .filter-preview-head{background:#fff}
 .filter-preview-box{background:#fff;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
@@ -1808,22 +1822,42 @@ function renderQuickFilter(cols) {
   const active = readyFilterSchema(S.filterQuick.kind);
   const q = String(S.readyFilterSearch || '').trim().toLowerCase();
   const visibleCards = q
-    ? cards.filter(c => [c.title, c.desc, c.category, c.id].join(' ').toLowerCase().includes(q))
+    ? cards.filter(c => readyFilterSearchText(c).includes(q))
     : cards;
+  const categories = [...new Set(cards.map(c => c.category || 'Genel'))];
+  const categoryCounts = categories.map(cat => [cat, visibleCards.filter(c => (c.category || 'Genel') === cat).length]).filter(([,n]) => n);
   return `<div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      <input class="cs" style="margin:0;" placeholder="Filtre ara: duplicate, hesap, tarih, tutar, kullanici..." value="${esc(S.readyFilterSearch||'')}" oninput="S.readyFilterSearch=this.value;render()">
-      <button class="btn sm" onclick="S.readyFilterSearch='';render()">Tum filtreler</button>
-      <span class="tag gr">${visibleCards.length}/${cards.length} filtre</span>
+    <div class="quick-filter-shell">
+      <div class="quick-filter-head">
+        <div>
+          <div class="quick-filter-title">Hazır Filtreler</div>
+          <div class="quick-filter-sub">Finansal denetim ve veri kalite kontrolleri tek ekranda. Kartlardaki kısa açıklama filtrenin neyi bulduğunu gösterir.</div>
+        </div>
+        <span class="tag gr">${visibleCards.length}/${cards.length} filtre</span>
+      </div>
+      <div class="quick-search-row">
+        <input class="cs" style="margin:0;" placeholder="Filtre ara: duplicate, hesap, tarih, tutar, kullanıcı, açıklama..." value="${esc(S.readyFilterSearch||'')}" oninput="S.readyFilterSearch=this.value;render()">
+        <button class="btn sm" onclick="S.readyFilterSearch='';render()">Tüm filtreler</button>
+        <button class="btn sm" onclick="S.filterQuick.kind='';S.filterPreview=null;render()">Seçimi temizle</button>
+      </div>
+      <div class="quick-meta-strip">
+        ${categoryCounts.map(([cat,n])=>`<span class="quick-meta-chip">${esc(cat)}: ${n}</span>`).join('')}
+      </div>
+      ${visibleCards.length ? `<div class="quick-grid">${visibleCards.map(card=>renderReadyFilterCard(card, active)).join('')}</div>` : `<div class="quick-empty-result">Aramanıza uygun hazır filtre bulunamadı.</div>`}
     </div>
-    <div class="quick-grid">${visibleCards.map(card=>`<div class="quick-card ${active?.id===card.id?'active':''}" onclick="selectReadyFilter('${card.id}')"><div class="quick-title">${card.title}</div><div class="quick-desc">${card.desc}</div></div>`).join('')}</div>
     <div class="dv"></div>
-    ${active ? `<div style="border:1px solid var(--bd);border-radius:8px;background:#fff;padding:12px;">
+    ${active ? `<div class="quick-param-panel">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
         <div>
+          <div class="quick-param-selected">Seçilen Filtre</div>
           <div class="sub" style="margin-bottom:6px;">Filtre Parametreleri</div>
-          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">Seçilen Filtre: ${esc(active.title)}</div>
-          <div style="font-size:13px;color:var(--mu);font-weight:600;">${esc(active.desc)}</div>
+          <div style="font-size:17px;font-weight:900;margin-bottom:5px;color:#172033;">${esc(active.title)}</div>
+          <div style="font-size:13px;color:var(--mu);font-weight:700;line-height:1.45;">${esc(active.desc)}</div>
+          <div class="quick-badges" style="margin-top:10px;">
+            <span class="quick-badge ${readyFilterCategoryClass(active)}">${esc(active.category || 'Genel')}</span>
+            <span class="quick-badge">${esc(readyFilterTypeLabel(active))}</span>
+            <span class="quick-badge">${active.minCols || 0}-${active.maxCols || 0} kolon</span>
+          </div>
         </div>
       </div>
       <div class="dv"></div>
@@ -1842,7 +1876,7 @@ function renderQuickFilter(cols) {
         <button class="btn gr" onclick="downloadFilteredExport('xlsx')" ${S.L.export?'disabled':''}>XLSX Olarak Disa Aktar</button>
         <button class="btn" onclick="downloadFilteredExport('csv')" ${S.L.export?'disabled':''}>CSV Olarak Disa Aktar</button>
       </div>
-    </div>` : `<div style="border:1px dashed var(--bd);border-radius:8px;background:#fff;padding:18px;color:var(--mu);font-weight:600;">Bir hızlı filtre seçerek parametrelerini görüntüleyebilirsiniz.</div>`}
+    </div>` : `<div style="border:1px dashed var(--bd);border-radius:8px;background:#fff;padding:18px;color:var(--mu);font-weight:700;">Bir hızlı filtre seçerek parametrelerini görüntüleyebilirsiniz.</div>`}
     <div class="dv"></div>
     <div style="border:1px solid var(--bd);border-radius:8px;background:#fff;padding:12px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -1852,6 +1886,61 @@ function renderQuickFilter(cols) {
       ${renderReadyFilterChain()}
     </div>
   </div>`;
+}
+
+function renderReadyFilterCard(card, active) {
+  return `<button type="button" class="quick-card ${active?.id===card.id?'active':''}" onclick="selectReadyFilter('${card.id}')" title="${esc(card.desc)}">
+    <div class="quick-card-top">
+      <div class="quick-icon">${readyFilterIcon(card)}</div>
+      <div>
+        <div class="quick-title">${esc(card.title)}</div>
+        <div class="quick-desc">${esc(card.desc)}</div>
+      </div>
+    </div>
+    <div class="quick-badges">
+      <span class="quick-badge ${readyFilterCategoryClass(card)}">${esc(card.category || 'Genel')}</span>
+      <span class="quick-badge">${esc(readyFilterTypeLabel(card))}</span>
+      <span class="quick-badge">${card.minCols || 0}-${card.maxCols || 0} kolon</span>
+    </div>
+  </button>`;
+}
+
+function readyFilterSearchText(card) {
+  return [
+    card.id, card.title, card.desc, card.category,
+    ...(card.dtypes || []),
+    ...(card.params || []).map(p => p.label)
+  ].join(' ').toLowerCase();
+}
+
+function readyFilterTypeLabel(card) {
+  const labels = {text:'Metin', numeric:'Sayı', date:'Tarih', boolean:'Boolean'};
+  const types = (card.dtypes || []).map(t => labels[t] || t);
+  if (!types.length) return 'Kolon rolü';
+  if (types.length > 2) return 'Çok tip';
+  return types.join(' + ');
+}
+
+function readyFilterCategoryClass(card) {
+  const cat = String(card.category || '').toLowerCase();
+  if (cat.includes('finansal') || cat.includes('muhasebe')) return 'audit';
+  if (cat.includes('tutar')) return 'amount';
+  if (cat.includes('zaman')) return 'time';
+  if (cat.includes('metin') || cat.includes('kullanici')) return 'text';
+  return '';
+}
+
+function readyFilterIcon(card) {
+  const id = String(card.id || '');
+  const cat = String(card.category || '').toLowerCase();
+  if (id.includes('amount') || id.includes('negative') || id.includes('zero') || id.includes('top') || id.includes('bottom') || id.includes('round')) return '₺';
+  if (id.includes('date') || id.includes('weekend') || id.includes('period') || id.includes('month') || id.includes('year') || id.includes('hours')) return 'T';
+  if (id.includes('account') || id.includes('debit') || id.includes('credit') || cat.includes('muhasebe') || cat.includes('finansal')) return 'H';
+  if (id.includes('user') || id.includes('creator') || id.includes('approver')) return 'K';
+  if (id.includes('duplicate') || id.includes('mukerrer') || id.includes('same')) return 'D';
+  if (id.includes('empty') || id.includes('blank')) return 'B';
+  if (id.includes('word') || id.includes('description') || id.includes('text') || id.includes('keyword')) return 'A';
+  return 'F';
 }
 
 function readyFilterSchemas() {
